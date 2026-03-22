@@ -1,0 +1,4 @@
+mlflow
+streamlit
+pandas
+google-cloud-aiplatform
