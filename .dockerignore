@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+.DS_Store
+mlflow.db
+mlruns/
+# Do not upload local credentials
+*.json
