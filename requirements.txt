@@ -1,4 +1,5 @@
-mlflow
+mlflow>=3.11.1
+uv
 streamlit
 pandas
 google-cloud-aiplatform

@@ -8,6 +8,7 @@ st.set_page_config(page_title="AI Flight Recorder", layout="wide")
 
 st.title("🛫 AI Flight Recorder for Agents")
 st.markdown("Not just logging → **diagnosis + replay**. Not just observability → **actionable improvement**. Not just experiment tracking → **agent-level trace intelligence**.")
+st.markdown("*(Showcasing MLflow 3.11.1: Trace Graph View, Issue Detection, Pickle-Free Models, & OpenTelemetry GenAI Semantic Conventions)*")
 
 # Setup MLflow
 mlflow.set_tracking_uri("sqlite:///mlflow.db")
@@ -29,7 +30,7 @@ with tab1:
 
 with tab2:
     st.header("Trace Dashboard")
-    st.info("Fetching traces exclusively from MLflow.")
+    st.info("Fetching traces exclusively from MLflow. **MLflow 3.11.1 tip:** In the MLflow UI, use the exact **Trace Graph View** and the **Detect Issues** button!")
     if st.button("Refresh Dashboard"):
         # We allow a larger limit for general dashboard viewing
         runs = fetch_recent_runs(limit=10)

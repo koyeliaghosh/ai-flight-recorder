@@ -13,7 +13,6 @@ from src.retrieval import get_invoice_details, get_purchase_order_details, get_s
 try:
     # Requires GOOGLE_APPLICATION_CREDENTIALS or gcloud auth application-default login
     vertexai.init(project=os.environ.get("GOOGLE_CLOUD_PROJECT", "my-project"), location="us-central1")
-    gen_model = GenerativeModel("gemini-1.5-flash-001")
     VERTEX_AVAILABLE = True
 except Exception as e:
     print(f"Warning: Vertex AI not initialized. {e}")
@@ -77,7 +76,14 @@ def run_agent(query: str, prompt_version: str = "v1", max_tries: int = 2) -> dic
         return {"response": "Mock fallback: Discrepancy found. Vertex AI credentials not detected.", "tries": 1}
     
     system_prompt = f"You are an AI Invoice Reconciliation Agent (Prompt Version {prompt_version}). Use tools to check invoices against POs."
-    chat = gen_model.start_chat(tools=[finance_tool])
+    
+    # Initialize the model instance with tools and system prompt per run
+    model = GenerativeModel(
+        "gemini-1.5-flash-001",
+        tools=[finance_tool],
+        system_instruction=[system_prompt]
+    )
+    chat = model.start_chat()
     
     current_try = 0
     message = query
