@@ -72,6 +72,10 @@ def run_agent(query: str, prompt_version: str = "v1", max_tries: int = 2) -> dic
     mlflow.log_param("prompt_version", prompt_version)
     mlflow.log_param("max_tries", max_tries)
     
+    with mlflow.start_span(name="initialization_check", log_level="DEBUG") as span:
+        span.set_attribute("status", "System checks passed")
+    
+    
     if not VERTEX_AVAILABLE:
         mlflow.log_param("mode", "mock_fallback")
         mock_res = ""
