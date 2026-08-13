@@ -148,8 +148,8 @@ with tab5:
     
     aliases = get_aliases()
     st.write("### Current Aliases")
-    for alias, mv in aliases.items():
-        st.write(f"- **{alias}** -> Version {mv.version}")
+    for alias, ver in aliases.items():
+        st.write(f"- **{alias}** -> Version {ver}")
         
     st.markdown("---")
     
