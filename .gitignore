@@ -1,3 +1,6 @@
+mlruns/
 mlflow.db
 __pycache__/
-.venv/
+*.pyc
+.DS_Store
+prompt.txt

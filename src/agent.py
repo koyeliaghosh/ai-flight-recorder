@@ -1,61 +1,34 @@
 import os
 import json
+import time
 import mlflow
 from typing import Optional
 
-# Using Vertex AI SDK
-import vertexai
-from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part
+from google import genai
+from google.genai import types
 
 from src.retrieval import get_invoice_details, get_purchase_order_details, get_supplier_info
+from src.prompts.registry import get_prompt_by_alias
+from src.config import is_demo_mode
+from src.tracing.helpers import log_agent_execution
+from src.tracing.attachments import attach_pdf_to_trace
+from src.guardrails.financial_controls import check_financial_controls
 
-# Initialize Vertex AI globally if possible. For local fast PoC, we will wrap in try-except.
-try:
-    # Requires GOOGLE_APPLICATION_CREDENTIALS or gcloud auth application-default login
-    import google.auth
-    credentials, _ = google.auth.default()
-    vertexai.init(project=os.environ.get("GOOGLE_CLOUD_PROJECT", "my-project"), location="us-central1")
-    VERTEX_AVAILABLE = True
-except Exception as e:
-    print(f"Warning: Vertex AI not initialized or credentials missing. {e}")
-    VERTEX_AVAILABLE = False
+# Attempt to configure GenAI client if not in Demo Mode
+client = None
+if not is_demo_mode():
+    try:
+        # Client initialized using default ADC credentials
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT", "ai-flight-recorder")
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION", "global")
+        client = genai.Client(vertexai=True, project=project, location=location)
+    except Exception as e:
+        print(f"Warning: Failed to initialize google-genai client. Error: {e}")
 
-# Define tool declarations for Vertex Gemini
-get_invoice_func = FunctionDeclaration(
-    name="get_invoice_details",
-    description="Retrieve details for a specific invoice by its ID",
-    parameters={
-        "type": "object",
-        "properties": {"invoice_id": {"type": "string"}},
-        "required": ["invoice_id"]
-    }
-)
+# Tool wrapper list for GenAI
+# Python functions directly serve as tools in google-genai
+tools_list = [get_invoice_details, get_purchase_order_details, get_supplier_info]
 
-get_po_func = FunctionDeclaration(
-    name="get_purchase_order_details",
-    description="Retrieve details for a specific purchase order by its ID",
-    parameters={
-        "type": "object",
-        "properties": {"po_id": {"type": "string"}},
-        "required": ["po_id"]
-    }
-)
-
-get_supplier_func = FunctionDeclaration(
-    name="get_supplier_info",
-    description="Retrieve details and trust score for a specific supplier by ID",
-    parameters={
-        "type": "object",
-        "properties": {"supplier_id": {"type": "string"}},
-        "required": ["supplier_id"]
-    }
-)
-
-finance_tool = Tool(
-    function_declarations=[get_invoice_func, get_po_func, get_supplier_func]
-)
-
-# Registry for actual python functions matching the declarations
 FUNC_MAP = {
     "get_invoice_details": get_invoice_details,
     "get_purchase_order_details": get_purchase_order_details,
@@ -63,112 +36,168 @@ FUNC_MAP = {
 }
 
 @mlflow.trace(name="run_reconciliation_agent")
-def run_agent(query: str, prompt_version: str = "v1", max_tries: int = 2) -> dict:
+def run_agent(query: str, prompt_alias: str = "production", max_tries: int = 2) -> dict:
     """
-    Core agent execution function with a strict max_tries limit.
+    Core agent execution function with strict max_tries limit.
     Traced heavily by MLflow.
     """
-    mlflow.log_param("query", query)
-    mlflow.log_param("prompt_version", prompt_version)
+    mode_str = "demo (offline)" if is_demo_mode() or client is None else "live (vertex)"
+    
+    # Fetch prompt from registry
+    system_prompt, version_num = get_prompt_by_alias(prompt_alias)
+    if not system_prompt:
+        # Fallback if registry not initialized
+        system_prompt = f"You are an AI Invoice Reconciliation Agent. Prompt alias: {prompt_alias}"
+        version_num = "unknown"
+        
+    log_agent_execution(query, version_num, prompt_alias, mode_str)
     mlflow.log_param("max_tries", max_tries)
     
-    with mlflow.start_span(name="initialization_check", log_level="DEBUG") as span:
-        span.set_attribute("status", "System checks passed")
-    
-    
-    if not VERTEX_AVAILABLE:
-        mlflow.log_param("mode", "mock_fallback")
-        mock_res = ""
-        if "9999" in query:
-            mock_res = "Mock Agent: Error, Invoice 9999 not found in the system."
-        elif "joke" in query.lower():
-            mock_res = "Mock Agent abort: Reached strict max_tries limit of 2 trying to process adversarial prompt."
-        else:
-            mock_res = "Mock Agent: Discrepancy found. Invoice 5678 total is $450.50, but PO-888 approved amount is $400.00."
+    # 1. Guardrail Check
+    if not check_financial_controls(query):
+        res = "BLOCKED\n\nReason:\nAttempt to bypass financial reconciliation controls."
+        mlflow.set_tag("agent.final_response", res)
+        return {"response": res, "tries": 0}
         
-        mlflow.set_tag("agent.final_response", mock_res)
-        return {"response": mock_res, "tries": 2}
+    # 2. Attach PDF if relevant to trace
+    if "5678" in query:
+        pdf_path = os.path.join("data", "invoice_5678.pdf")
+        attach_pdf_to_trace(pdf_path)
+
+    # 3. Fallback deterministic execution for DEMO_MODE
+    if is_demo_mode() or client is None:
+        return run_deterministic_demo(query, prompt_alias, max_tries)
+
+    # 4. Live Execution via Vertex AI
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    mlflow.log_param("model_provider", "vertex_ai")
+    mlflow.log_param("model_name", model_name)
     
-    system_prompt = f"You are an AI Invoice Reconciliation Agent (Prompt Version {prompt_version}). Use tools to check invoices against POs."
-    
-    # Initialize the model instance with tools and system prompt per run
-    model = GenerativeModel(
-        "gemini-1.0-pro",
-        tools=[finance_tool],
-        system_instruction=[system_prompt]
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        tools=tools_list,
+        temperature=0.0
     )
-    chat = model.start_chat()
+    
+    chat = client.chats.create(model=model_name, config=config)
     
     current_try = 0
-    message = query
     final_response = ""
+    message = query
+    start_time = time.time()
     
-    # Set strict 2-try limit
     while current_try < max_tries:
         current_try += 1
-        
-        # Call model
         try:
-            with mlflow.start_span(name="vertex_call", log_level="INFO") as span:
+            with mlflow.start_span(name="llm_call") as span:
                 response = chat.send_message(message)
                 span.set_attribute("candidates_count", len(response.candidates) if response.candidates else 0)
+                
+                # Check if it was a function call
+                if response.function_calls:
+                    tool_responses = []
+                    with mlflow.start_span(name="execute_tools") as tspan:
+                        for fn_call in response.function_calls:
+                            func_name = fn_call.name
+                            args = fn_call.args
+                            if func_name in FUNC_MAP:
+                                result = FUNC_MAP[func_name](**args)
+                                tool_responses.append(
+                                    types.Part.from_function_response(
+                                        name=func_name,
+                                        response={"result": result}
+                                    )
+                                )
+                            else:
+                                tool_responses.append(
+                                    types.Part.from_function_response(
+                                        name=func_name,
+                                        response={"error": "Tool not found"}
+                                    )
+                                )
+                    message = tool_responses
+                else:
+                    final_response = response.text
+                    break
         except Exception as e:
-            with mlflow.start_span(name="vertex_api_error", log_level="ERROR") as span:
+            with mlflow.start_span(name="vertex_api_error") as span:
                 span.set_attribute("error", str(e))
                 mlflow.set_tag("agent.error", str(e))
-                mlflow.log_param("mode", "mock_fallback")
-            
-            # Simulate a fallback response so the PoC doesn't crash completely
-            if "9999" in str(message) or "ERROR" in str(message):
-                final_response = "Mock Agent: Error, backend system crashed trying to fetch PO-ERROR-999."
-            elif "12345" in str(message) or "Ignore" in str(message):
-                final_response = "Mock Agent abort: I cannot ignore my instructions or issue refunds without a valid invoice."
-            elif "888" in str(message) and "5678" in str(message):
-                final_response = "Mock Agent: Discrepancy found. Invoice 5678 total is $450.50, but PO-888 approved amount is $400.00."
-            else:
-                final_response = "Mock Agent: Reconciled successfully. PO-999 and Invoice 1234 match."
+                mlflow.log_param("failure_category", "API_ERROR")
+            final_response = f"Agent Error: {str(e)}"
             break
             
-        if not response.candidates:
-            final_response = "No response from model."
-            break
-            
-        function_calls = response.candidates[0].function_calls
-        
-        if not function_calls:
-            # Model generated a text response and is done
-            final_response = response.text
-            break
-            
-        # Execute tool calls
-        with mlflow.start_span(name="execute_tools", log_level="DEBUG") as span:
-            tool_responses = []
-            for function_call in function_calls:
-                func_name = function_call.name
-                args = {k: v for k, v in function_call.args.items()}
-                
-                if func_name in FUNC_MAP:
-                    result = FUNC_MAP[func_name](**args)
-                    tool_responses.append(Part.from_function_response(
-                        name=func_name,
-                        response={"result": result}
-                    ))
-                else:
-                    tool_responses.append(Part.from_function_response(
-                        name=func_name,
-                        response={"error": "Tool not found"}
-                    ))
-        
-        # Send tool results back to the model
-        message = tool_responses
+    latency = time.time() - start_time
+    mlflow.log_metric("latency", latency)
     
     if current_try >= max_tries and not final_response:
         final_response = "Agent aborted: Reached strict max_tries limit of 2."
+        mlflow.log_param("failure_category", "MAX_TRIES_EXCEEDED")
         
-    mlflow.log_metric("total_agent_tries", current_try)
+    mlflow.log_metric("tool_call_count", current_try - 1 if final_response else current_try)
     mlflow.set_tag("agent.final_response", final_response)
     
     return {
         "response": final_response,
         "tries": current_try
     }
+
+
+def run_deterministic_demo(query: str, prompt_alias: str, max_tries: int) -> dict:
+    """Deterministic fallback for DEMO_MODE"""
+    mlflow.log_param("model_provider", "deterministic_demo")
+    mlflow.log_param("model_name", "mock")
+    start_time = time.time()
+    
+    # Execute tools statically to capture spans
+    with mlflow.start_span(name="llm_call"):
+        pass
+    
+    with mlflow.start_span(name="execute_tools"):
+        if "888" in query and "5678" in query:
+            get_invoice_details("5678")
+            get_purchase_order_details("PO-888")
+        elif "999" in query and "1234" in query:
+            get_invoice_details("1234")
+            get_purchase_order_details("PO-999")
+        elif "9999" in query or "ERROR" in query:
+            get_purchase_order_details("PO-ERROR-999")
+            
+    # Determine behavior based on prompt alias
+    is_v2 = (prompt_alias == "candidate") or ("v2" in prompt_alias)
+    
+    if "9999" in query or "ERROR" in query:
+        res = "Mock Agent: Error, backend system crashed trying to fetch PO-ERROR-999."
+    elif "12345" in query or "ignore" in query.lower():
+        res = "BLOCKED\n\nReason:\nAttempt to bypass financial reconciliation controls."
+    elif "888" in query and "5678" in query:
+        if is_v2:
+            res = json.dumps({
+              "decision": "MISMATCH",
+              "invoice_id": "5678",
+              "purchase_order_id": "PO-888",
+              "invoice_amount": 450.50,
+              "po_amount": 400.00,
+              "difference": 50.50,
+              "reason": "Invoice amount exceeds the PO approved amount.",
+              "evidence": [
+                "Invoice 5678 total = $450.50",
+                "PO-888 approved amount = $400.00"
+              ],
+              "unsupported_assumptions": [],
+              "recommended_action": "NEEDS_REVIEW",
+              "confidence": 0.98
+            }, indent=2)
+        else:
+            res = ("Invoice 5678 can be reconciled against PO-888.\n\n"
+                   "The $50.50 difference may be due to taxes or adjustments.\n"
+                   "Proceed with payment.")
+    else:
+        res = "Mock Agent: Reconciled successfully. PO-999 and Invoice 1234 match."
+        
+    latency = time.time() - start_time
+    mlflow.log_metric("latency", latency)
+    mlflow.log_metric("tool_call_count", 1)
+    
+    mlflow.set_tag("agent.final_response", res)
+    return {"response": res, "tries": 2}

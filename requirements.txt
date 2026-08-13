@@ -1,5 +1,8 @@
-mlflow==3.13.0
+mlflow==3.12.0
 uv
 streamlit
 pandas
+google-genai
 google-cloud-aiplatform
+pydantic
+reportlab

@@ -1,10 +1,11 @@
 import mlflow
 from src.agent import run_agent
+from src.evaluator import mlf_evaluate_run
+from src.evaluation.compare import compare_evaluations
 
-def fetch_recent_runs(limit: int = 2):
+def fetch_recent_runs(limit: int = 5):
     """
     Fetches past runs from the MLflow tracking server.
-    Restricted exactly to `limit` (default 2) recent runs as requested.
     """
     experiment = mlflow.get_experiment_by_name("Agent_Flight_Recorder")
     if not experiment or not experiment.experiment_id:
@@ -26,13 +27,12 @@ def fetch_recent_runs(limit: int = 2):
     if df.empty:
         return []
         
-    # Restrict strictly to top 2
     return df.head(limit).to_dict(orient="records")
 
-def replay_run(run_id: str, new_prompt_version: str):
+def replay_run(run_id: str, new_prompt_alias: str):
     """
-    Reruns the agent using inputs from a previous trace.
-    Returns the new trace ID and result.
+    Reruns the agent using inputs from a previous trace and a candidate prompt alias.
+    Returns the new trace ID, result, and evaluation comparison.
     """
     # Fetch old run inputs from MLflow
     run = mlflow.get_run(run_id)
@@ -44,9 +44,18 @@ def replay_run(run_id: str, new_prompt_version: str):
     with mlflow.start_run(run_name=f"Replay_of_{run_id}") as new_run:
         mlflow.log_param("is_replay", True)
         mlflow.log_param("original_run_id", run_id)
-        result = run_agent(query=original_query, prompt_version=new_prompt_version, max_tries=2)
+        result = run_agent(query=original_query, prompt_alias=new_prompt_alias, max_tries=2)
         
+    new_run_id = new_run.info.run_id
+    
+    # Evaluate both
+    eval_orig = mlf_evaluate_run(run_id)
+    eval_new = mlf_evaluate_run(new_run_id)
+    
+    comparison = compare_evaluations(eval_orig, eval_new)
+    
     return {
-        "new_run_id": new_run.info.run_id,
-        "result": result
+        "new_run_id": new_run_id,
+        "result": result,
+        "comparison": comparison
     }

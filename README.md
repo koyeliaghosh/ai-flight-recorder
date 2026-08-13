@@ -1,16 +1,19 @@
-# AI Flight Recorder for Agents
+# AI Flight Recorder for Agentic AI
+
+**Live Demo:** [https://ai-flight-recorder-943799980636.us-central1.run.app/](https://ai-flight-recorder-943799980636.us-central1.run.app/)
+
+> Trace what happened. Evaluate what went wrong. Replay with a better prompt. Govern what reaches production.
 
 This project implements a web-based "flight recorder" for an AI agent built on three core pillars:
-1. **Not just logging → diagnosis + replay:** We trace the exact agent execution and allow users to actively replay, tweak, and debug exactly **2** past runs side-by-side.
-2. **Not just observability → actionable improvement:** We use exclusive MLflow evaluation and an automated red team (`src/red_team.py`) to structurally improve the agent's reliability.
-3. **Not just experiment tracking → agent-level trace intelligence:** We rely on MLflow to deliver a dedicated Trace Dashboard, revealing reasoning, strict tool call limits (max 2 tries), and failure classifications.
+1. **Not just logging → diagnosis + replay:** We trace the exact agent execution and allow users to actively replay, tweak, and debug exactly past runs side-by-side.
+2. **Not just observability → actionable improvement:** We use exclusive MLflow evaluation and an automated red team to structurally improve the agent's reliability.
+3. **Not just experiment tracking → agent-level trace intelligence:** We rely on MLflow to deliver a dedicated Trace Dashboard, revealing reasoning, tool calls, and failure classifications.
 
-### Showcasing MLflow 3.12 Features
-- **Automatic Issue Identification:** Use the "Detect Issues" button in the MLflow Trace UI to let an AI judge verify correctness and safety for your recorded Agent execution traces.
+### MLflow 3.12 Highlights Demonstrated
+- **Multimodal Tracing:** Attach and view PDFs in the trace view natively.
+- **PromptOps & Lineage:** End-to-end integration mapping traces back to MLflow Prompt Registry aliases.
 - **Trace Graph View:** Debug complex agent logic using the interactive graph visualization in the MLflow UI.
-- **Native OpenTelemetry GenAI Semantic Conventions:** Configured via `MLFLOW_ENABLE_OTEL_GENAI_SEMCONV=True`.
-- **Pickle-Free Serialization Check:** Configured via `MLFLOW_ALLOW_PICKLE_DESERIALIZATION=False` to securely disable unsafe model loads.
-- **UV Dependency Tracking:** Added `uv` to dependencies as part of MLflow's native UV support.
+- **Native OpenTelemetry GenAI Semantic Conventions:** Configured natively to capture metrics.
 
 ## Architecture
 ```mermaid
