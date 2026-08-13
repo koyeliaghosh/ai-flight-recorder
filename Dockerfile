@@ -15,7 +15,7 @@ WORKDIR $APP_HOME
 COPY . ./
 
 # Install required dependencies and Nginx
-RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y nginx mime-support && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy Nginx config and make start script executable

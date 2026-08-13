@@ -16,5 +16,19 @@ def create_invoice_pdf():
     c.save()
     print("PDF generated successfully.")
 
+def create_po_pdf():
+    c = canvas.Canvas("data/po_888.pdf", pagesize=letter)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, 750, "Purchase Order #PO-888")
+    
+    c.setFont("Helvetica", 12)
+    c.drawString(50, 700, "To: OfficeSupplies Co.")
+    c.drawString(50, 675, "Approved Amount: $400.00")
+    c.drawString(50, 650, "Status: APPROVED")
+    
+    c.save()
+    print("PO PDF generated successfully.")
+
 if __name__ == "__main__":
     create_invoice_pdf()
+    create_po_pdf()

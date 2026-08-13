@@ -61,8 +61,10 @@ def run_agent(query: str, prompt_alias: str = "production", max_tries: int = 2) 
         
     # 2. Attach PDF if relevant to trace
     if "5678" in query:
-        pdf_path = os.path.join("data", "invoice_5678.pdf")
-        attach_pdf_to_trace(pdf_path)
+        invoice_path = os.path.join("data", "invoice_5678.pdf")
+        po_path = os.path.join("data", "po_888.pdf")
+        attach_pdf_to_trace(invoice_path)
+        attach_pdf_to_trace(po_path)
 
     # 3. Fallback deterministic execution for DEMO_MODE
     if is_demo_mode() or client is None:
@@ -117,7 +119,7 @@ def run_agent(query: str, prompt_alias: str = "production", max_tries: int = 2) 
                                 )
                     message = tool_responses
                 else:
-                    final_response = response.text
+                    final_response = response.text or ""
                     break
         except Exception as e:
             with mlflow.start_span(name="vertex_api_error") as span:
