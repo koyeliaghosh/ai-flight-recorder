@@ -26,7 +26,7 @@ is_demo = os.environ.get("DEMO_MODE", "false").lower() == "true"
 col1.metric("MLflow", "3.12.0")
 col2.metric("Environment", "Demo" if is_demo else "Live")
 col3.metric("Model", "Deterministic Demo" if is_demo else os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
-col4.metric("Prompt", "reconciliation-agent@production")
+col4.metric("Prompt", "reconciliation@prod", help="reconciliation-agent@production")
 col5.metric("Trace Store", "Connected")
 st.markdown("---")
 
