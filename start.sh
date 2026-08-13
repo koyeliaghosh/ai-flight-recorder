@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Initialize the mock data
+python create_pdf.py
+
 # Start MLflow server in the background (1 worker to prevent OOM)
 mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000 --workers 1 &
 
@@ -17,7 +20,10 @@ while ! python -c "import urllib.request; urllib.request.urlopen('http://127.0.0
   sleep 1
 done
 
-echo "Backends are ready! Starting Nginx."
+echo "Backends are ready! Initializing demo..."
+python -m src.reset_demo
+
+echo "Starting Nginx."
 
 # Start Nginx in the foreground to keep the container running
 nginx -g 'daemon off;'
